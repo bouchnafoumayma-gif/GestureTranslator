@@ -11,7 +11,6 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
     setWindowTitle("Traducteur de Gestes");
 
-    // On utilise cameraLabel directement pour afficher l'image
     ui->cameraLabel->setScaledContents(true);
 
     QList<QCameraDevice> camList = QMediaDevices::videoInputs();
@@ -50,7 +49,6 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-// Convertit QImage en cv::Mat
 cv::Mat QImageToMat(const QImage &image)
 {
     QImage converted = image.convertToFormat(QImage::Format_RGB888);
@@ -62,7 +60,6 @@ cv::Mat QImageToMat(const QImage &image)
     return mat.clone();
 }
 
-// Convertit cv::Mat en QImage
 QImage MatToQImage(const cv::Mat &mat)
 {
     cv::Mat rgb;
@@ -133,8 +130,9 @@ QString MainWindow::detectGesture(const cv::Mat &frame)
     cv::Rect zone(cx - w/2, cy - h/2, w, h);
     if (zone.x < 0 || zone.y < 0 ||
         zone.x + zone.width  > frame.cols ||
-        zone.y + zone.height > frame.rows)
+        zone.y + zone.height > frame.rows) {
         return "aucun";
+    }
 
     cv::Mat handRegion = frame(zone);
     int fingers = countFingers(handRegion);
@@ -157,41 +155,63 @@ void MainWindow::processFrame(const QVideoFrame &frame)
     cv::Mat mat = QImageToMat(currentFrame);
     if (mat.empty()) return;
 
-    // Dessine le rectangle vert guide
     int cx = mat.cols / 2;
     int cy = mat.rows / 2;
     int w  = mat.cols / 3;
     int h  = mat.rows / 2;
+
     cv::rectangle(mat,
                   cv::Point(cx - w/2, cy - h/2),
                   cv::Point(cx + w/2, cy + h/2),
                   cv::Scalar(0, 255, 0), 2);
 
-    // Affiche l'image avec le rectangle dans cameraLabel
     QImage display = MatToQImage(mat);
     ui->cameraLabel->setPixmap(QPixmap::fromImage(display));
 
-    // Détecte le geste
     QString gesture = detectGesture(mat);
 
     if (gesture == "poing") {
         ui->gestureLabel->setText("Geste : Poing ✊");
-        ui->translationLabel->setText("Traduction : Merci !");
+        ui->gestureLabel->setStyleSheet("color: blue; font-size: 14px;");
+        ui->translationLabel->setText("Merci !");
+        ui->translationLabel->setStyleSheet(
+            "color: white; background-color: blue;"
+            "border-radius: 10px; font-size: 18px; font-weight: bold;");
     } else if (gesture == "un_doigt") {
         ui->gestureLabel->setText("Geste : Un doigt ☝️");
-        ui->translationLabel->setText("Traduction : Oui !");
+        ui->gestureLabel->setStyleSheet("color: green; font-size: 14px;");
+        ui->translationLabel->setText("Oui !");
+        ui->translationLabel->setStyleSheet(
+            "color: white; background-color: green;"
+            "border-radius: 10px; font-size: 18px; font-weight: bold;");
     } else if (gesture == "deux_doigts") {
         ui->gestureLabel->setText("Geste : Deux doigts ✌️");
-        ui->translationLabel->setText("Traduction : Non !");
+        ui->gestureLabel->setStyleSheet("color: red; font-size: 14px;");
+        ui->translationLabel->setText("Non !");
+        ui->translationLabel->setStyleSheet(
+            "color: white; background-color: red;"
+            "border-radius: 10px; font-size: 18px; font-weight: bold;");
     } else if (gesture == "trois_doigts") {
         ui->gestureLabel->setText("Geste : Trois doigts 🤟");
-        ui->translationLabel->setText("Traduction : S'il vous plaît !");
+        ui->gestureLabel->setStyleSheet("color: orange; font-size: 14px;");
+        ui->translationLabel->setText("S'il vous plaît !");
+        ui->translationLabel->setStyleSheet(
+            "color: white; background-color: orange;"
+            "border-radius: 10px; font-size: 18px; font-weight: bold;");
     } else if (gesture == "main_ouverte") {
         ui->gestureLabel->setText("Geste : Main ouverte ✋");
-        ui->translationLabel->setText("Traduction : Bonjour !");
+        ui->gestureLabel->setStyleSheet("color: purple; font-size: 14px;");
+        ui->translationLabel->setText("Bonjour !");
+        ui->translationLabel->setStyleSheet(
+            "color: white; background-color: purple;"
+            "border-radius: 10px; font-size: 18px; font-weight: bold;");
     } else {
         ui->gestureLabel->setText("Mets ta main dans le rectangle !");
-        ui->translationLabel->setText("Traduction : —");
+        ui->gestureLabel->setStyleSheet("color: gray; font-size: 14px;");
+        ui->translationLabel->setText("—");
+        ui->translationLabel->setStyleSheet(
+            "color: gray; background-color: transparent;"
+            "font-size: 18px;");
     }
 }
 
