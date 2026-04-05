@@ -23,4 +23,17 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 DISTFILES += \
     app.manifest
 
+# Lien vers OpenCV
+# Lien vers OpenCV MinGW
+INCLUDEPATH += C:\opencv_mingw\OpenCV-MinGW-Build-OpenCV-4.5.5-x64\include
+
+LIBS += -LC:\opencv_mingw\OpenCV-MinGW-Build-OpenCV-4.5.5-x64\x64\mingw\lib \
+        -lopencv_core455 \
+        -lopencv_imgproc455 \
+        -lopencv_highgui455 \
+        -lopencv_imgcodecs455 \
+        -lopencv_video455 \
+        -lopencv_videoio455 \
+        -lopencv_objdetect455
+
 

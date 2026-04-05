@@ -1,6 +1,8 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include <QMediaDevices>
+#include <QPixmap>
+#include <opencv2/imgproc.hpp>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -9,10 +11,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
     setWindowTitle("Traducteur de Gestes");
 
-    videoWidget = new QVideoWidget(this);
-    videoWidget->setGeometry(ui->cameraLabel->geometry());
-    videoWidget->show();
-    ui->cameraLabel->hide();
+    // On utilise cameraLabel directement pour afficher l'image
+    ui->cameraLabel->setScaledContents(true);
 
     QList<QCameraDevice> camList = QMediaDevices::videoInputs();
     if (!camList.isEmpty()) {
@@ -35,15 +35,12 @@ MainWindow::MainWindow(QWidget *parent)
     session->setVideoSink(videoSink);
 
     connect(videoSink, &QVideoSink::videoFrameChanged,
-            videoWidget->videoSink(), &QVideoSink::setVideoFrame);
-
-    connect(videoSink, &QVideoSink::videoFrameChanged,
             this, &MainWindow::processFrame);
 
     camera->start();
     ui->startButton->setEnabled(false);
     ui->stopButton->setEnabled(true);
-    ui->gestureLabel->setText("Geste : aucun détecté");
+    ui->gestureLabel->setText("Mets ta main dans le rectangle !");
     ui->translationLabel->setText("Traduction : —");
 }
 
@@ -53,97 +50,147 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-// Vérifie si un pixel est couleur peau
-bool isSkinPixel(int r, int g, int b)
+// Convertit QImage en cv::Mat
+cv::Mat QImageToMat(const QImage &image)
 {
-    return (r > 95 && g > 40 && b > 20 &&
-            r > g && r > b &&
-            (r - g) > 15 &&
-            r < 250);
+    QImage converted = image.convertToFormat(QImage::Format_RGB888);
+    cv::Mat mat(converted.height(), converted.width(),
+                CV_8UC3,
+                const_cast<uchar*>(converted.bits()),
+                converted.bytesPerLine());
+    cv::cvtColor(mat, mat, cv::COLOR_RGB2BGR);
+    return mat.clone();
 }
 
-// Compte les pixels peau dans l'image
-int MainWindow::countSkinPixels(const QImage &image)
+// Convertit cv::Mat en QImage
+QImage MatToQImage(const cv::Mat &mat)
 {
-    int count = 0;
-    for (int y = 0; y < image.height(); y += 4) {
-        for (int x = 0; x < image.width(); x += 4) {
-            QColor color = image.pixelColor(x, y);
-            if (isSkinPixel(color.red(), color.green(), color.blue())) {
-                count++;
-            }
+    cv::Mat rgb;
+    cv::cvtColor(mat, rgb, cv::COLOR_BGR2RGB);
+    return QImage(rgb.data, rgb.cols, rgb.rows,
+                  rgb.step, QImage::Format_RGB888).copy();
+}
+
+int MainWindow::countFingers(const cv::Mat &handRegion)
+{
+    cv::Mat gray;
+    cv::cvtColor(handRegion, gray, cv::COLOR_BGR2GRAY);
+    cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
+
+    cv::Mat binary;
+    cv::threshold(gray, binary, 0, 255,
+                  cv::THRESH_BINARY + cv::THRESH_OTSU);
+
+    cv::Mat kernel = cv::getStructuringElement(
+        cv::MORPH_ELLIPSE, cv::Size(5, 5));
+    cv::morphologyEx(binary, binary, cv::MORPH_CLOSE, kernel);
+    cv::morphologyEx(binary, binary, cv::MORPH_OPEN, kernel);
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(binary, contours,
+                     cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+    if (contours.empty()) return -1;
+
+    int maxIdx = 0;
+    double maxArea = 0;
+    for (int i = 0; i < (int)contours.size(); i++) {
+        double area = cv::contourArea(contours[i]);
+        if (area > maxArea) {
+            maxArea = area;
+            maxIdx = i;
         }
     }
-    return count;
+
+    if (maxArea < 2000) return -1;
+
+    std::vector<int> hullIdx;
+    cv::convexHull(contours[maxIdx], hullIdx);
+
+    if (hullIdx.size() <= 3) return 0;
+
+    std::vector<cv::Vec4i> defects;
+    cv::convexityDefects(contours[maxIdx], hullIdx, defects);
+
+    int fingers = 0;
+    for (const cv::Vec4i &defect : defects) {
+        float depth = defect[3] / 256.0f;
+        if (depth > 20) fingers++;
+    }
+
+    return fingers;
 }
 
-// Analyse l'image et retourne le geste détecté
-QString MainWindow::detectGesture(const QImage &image)
+QString MainWindow::detectGesture(const cv::Mat &frame)
 {
-    int skinPixels = countSkinPixels(image);
+    if (frame.empty()) return "aucun";
 
-    // Pas de main détectée
-    if (skinPixels < 150) {
+    int cx = frame.cols / 2;
+    int cy = frame.rows / 2;
+    int w  = frame.cols / 3;
+    int h  = frame.rows / 2;
+
+    cv::Rect zone(cx - w/2, cy - h/2, w, h);
+    if (zone.x < 0 || zone.y < 0 ||
+        zone.x + zone.width  > frame.cols ||
+        zone.y + zone.height > frame.rows)
         return "aucun";
-    }
 
-    // On analyse la forme de la main
-    // On divise l'image en 3 zones : haut, milieu, bas
-    int hauteur = image.height();
-    int largeur = image.width();
+    cv::Mat handRegion = frame(zone);
+    int fingers = countFingers(handRegion);
 
-    // Zone haute (doigts)
-    int pixelsHaut = 0;
-    for (int y = 0; y < hauteur / 3; y += 2) {
-        for (int x = 0; x < largeur; x += 2) {
-            QColor c = image.pixelColor(x, y);
-            if (isSkinPixel(c.red(), c.green(), c.blue()))
-                pixelsHaut++;
-        }
-    }
+    if (fingers == -1) return "aucun";
+    if (fingers == 0)  return "poing";
+    if (fingers == 1)  return "un_doigt";
+    if (fingers == 2)  return "deux_doigts";
+    if (fingers == 3)  return "trois_doigts";
+    if (fingers >= 4)  return "main_ouverte";
 
-    // Zone basse (paume)
-    int pixelsBas = 0;
-    for (int y = (hauteur * 2) / 3; y < hauteur; y += 2) {
-        for (int x = 0; x < largeur; x += 2) {
-            QColor c = image.pixelColor(x, y);
-            if (isSkinPixel(c.red(), c.green(), c.blue()))
-                pixelsBas++;
-        }
-    }
-
-    // Analyse des zones pour deviner le geste
-    float ratio = (pixelsBas > 0) ? (float)pixelsHaut / pixelsBas : 0;
-
-    if (skinPixels > 400) {
-        return "main_ouverte";   // beaucoup de peau → main ouverte
-    } else if (ratio < 0.3) {
-        return "poing";          // peu de pixels en haut → poing fermé
-    } else {
-        return "un_doigt";       // pixels concentrés en haut → doigt levé
-    }
+    return "aucun";
 }
-// Appelée pour chaque image de la caméra
+
 void MainWindow::processFrame(const QVideoFrame &frame)
 {
     currentFrame = frame.toImage();
     if (currentFrame.isNull()) return;
 
-    QImage smallImage = currentFrame.scaled(160, 120);
-    QString gesture = detectGesture(smallImage);
+    cv::Mat mat = QImageToMat(currentFrame);
+    if (mat.empty()) return;
 
-    // Affiche le geste et sa traduction
-    if (gesture == "main_ouverte") {
-        ui->gestureLabel->setText("Geste : Main ouverte ✋");
-        ui->translationLabel->setText("Traduction : Bonjour !");
-    } else if (gesture == "poing") {
+    // Dessine le rectangle vert guide
+    int cx = mat.cols / 2;
+    int cy = mat.rows / 2;
+    int w  = mat.cols / 3;
+    int h  = mat.rows / 2;
+    cv::rectangle(mat,
+                  cv::Point(cx - w/2, cy - h/2),
+                  cv::Point(cx + w/2, cy + h/2),
+                  cv::Scalar(0, 255, 0), 2);
+
+    // Affiche l'image avec le rectangle dans cameraLabel
+    QImage display = MatToQImage(mat);
+    ui->cameraLabel->setPixmap(QPixmap::fromImage(display));
+
+    // Détecte le geste
+    QString gesture = detectGesture(mat);
+
+    if (gesture == "poing") {
         ui->gestureLabel->setText("Geste : Poing ✊");
         ui->translationLabel->setText("Traduction : Merci !");
     } else if (gesture == "un_doigt") {
         ui->gestureLabel->setText("Geste : Un doigt ☝️");
         ui->translationLabel->setText("Traduction : Oui !");
+    } else if (gesture == "deux_doigts") {
+        ui->gestureLabel->setText("Geste : Deux doigts ✌️");
+        ui->translationLabel->setText("Traduction : Non !");
+    } else if (gesture == "trois_doigts") {
+        ui->gestureLabel->setText("Geste : Trois doigts 🤟");
+        ui->translationLabel->setText("Traduction : S'il vous plaît !");
+    } else if (gesture == "main_ouverte") {
+        ui->gestureLabel->setText("Geste : Main ouverte ✋");
+        ui->translationLabel->setText("Traduction : Bonjour !");
     } else {
-        ui->gestureLabel->setText("Geste : Aucun détecté");
+        ui->gestureLabel->setText("Mets ta main dans le rectangle !");
         ui->translationLabel->setText("Traduction : —");
     }
 }
@@ -151,10 +198,9 @@ void MainWindow::processFrame(const QVideoFrame &frame)
 void MainWindow::on_startButton_clicked()
 {
     camera->start();
-    videoWidget->show();
     ui->startButton->setEnabled(false);
     ui->stopButton->setEnabled(true);
-    ui->gestureLabel->setText("Geste : en attente...");
+    ui->gestureLabel->setText("Mets ta main dans le rectangle !");
 }
 
 void MainWindow::on_stopButton_clicked()
