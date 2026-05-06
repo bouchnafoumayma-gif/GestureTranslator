@@ -17,10 +17,10 @@
    <widget class="QLabel" name="cameraLabel">
     <property name="geometry">
      <rect>
-      <x>50</x>
-      <y>20</y>
+      <x>-20</x>
+      <y>49</y>
       <width>640</width>
-      <height>400</height>
+      <height>351</height>
      </rect>
     </property>
     <property name="text">
@@ -95,6 +95,59 @@
     <property name="text">
      <string>Arreter</string>
     </property>
+   </widget>
+   <widget class="QComboBox" name="contexteCombo">
+    <property name="geometry">
+     <rect>
+      <x>520</x>
+      <y>10</y>
+      <width>201</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="currentText">
+     <string>General</string>
+    </property>
+    <item>
+     <property name="text">
+      <string>General</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>Sante</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>Restaurant</string>
+     </property>
+    </item>
+   </widget>
+   <widget class="QComboBox" name="langueCombo">
+    <property name="geometry">
+     <rect>
+      <x>52</x>
+      <y>10</y>
+      <width>191</width>
+      <height>22</height>
+     </rect>
+    </property>
+    <item>
+     <property name="text">
+      <string>FR</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>AR</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>EN</string>
+     </property>
+    </item>
    </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">

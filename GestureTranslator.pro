@@ -1,4 +1,5 @@
-QT += core gui widgets multimedia multimediawidgets
+QT += core gui widgets multimedia multimediawidgets sql
+QT += sql
 CONFIG += c++17
 
 # You can make your code fail to compile if it uses deprecated APIs.
