@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/images">
+        <file>images/deux_doigts.webp</file>
+        <file>images/main_ouverte.webp</file>
+        <file>images/poing.jpg</file>
+        <file>images/trois_doigt.webp</file>
+        <file>images/un_doigt.webp</file>
+    </qresource>
+</RCC>

@@ -8,10 +8,11 @@
 #include <QVideoFrame>
 #include <QImage>
 #include <QLabel>
-#include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp>
+#include <QTimer> // Ajouté pour QTimer*
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -29,36 +30,38 @@ private slots:
     void on_startButton_clicked();
     void on_stopButton_clicked();
     void processFrame(const QVideoFrame &frame);
-    // Sous la section private slots:
     void on_sosButton_clicked();
+    void on_apprentissageToggle_clicked();
+    void validerGeste();
 
-
-private:
 private:
     Ui::MainWindow *ui;
+
+    // Caméra et flux
     QCamera *camera;
     QMediaCaptureSession *session;
     QVideoSink *videoSink;
     QImage currentFrame;
-    // Sous la section private:
+
+    // États et modes
     bool isUrgencyMode;
+    bool isApprentissageMode = false;
+    QString gesteCible;
+    QTimer *timerApprentissage;
+    int progressCount = 0;
 
-    // --- SQL ---
+    // SQL
     QSqlDatabase db;
-    void initDatabase(); // Nouvelle fonction pour préparer la base
-    QString getTranslation(const QString &gesture); // Utilisation de const référence
+    void initDatabase();
+    QString getTranslation(const QString &gesture);
 
-    // --- Traitement d'image ---
+    // Traitement d'image (OpenCV)
     QString detectGesture(const cv::Mat &frame);
     int countFingers(const cv::Mat &handRegion);
 
-    // --- Pour la stabilité (évite les erreurs de détection rapides) ---
+    // Stabilité
     QString lastGesture;
     int stabilityCounter = 0;
 };
 
-
-
-
-
-#endif
+#endif // MAINWINDOW_H

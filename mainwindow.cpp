@@ -7,6 +7,7 @@
 #include <QDebug>
 #include <cmath>
 #include <opencv2/imgproc.hpp>
+#include <QTimer>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -27,8 +28,8 @@ MainWindow::MainWindow(QWidget *parent)
     // 2. Configuration de l'Interface
     setWindowTitle("GestureTranslator - ENSAH");
     ui->cameraLabel->setScaledContents(true);
+    ui->imageModele->setScaledContents(true); // Ajouté pour que l'image de consigne s'adapte bien
 
-    // Initialisation des listes déroulantes
     if(ui->contexteCombo->count() == 0) {
         ui->contexteCombo->addItems({"General", "Sante", "Restaurant"});
     }
@@ -36,7 +37,6 @@ MainWindow::MainWindow(QWidget *parent)
         ui->langueCombo->addItems({"FR", "EN", "AR"});
     }
 
-    // Initialisation du mode Urgence
     isUrgencyMode = false;
     ui->sosButton->setStyleSheet("background-color: #8B0000; color: white; font-weight: bold; border-radius: 5px;");
 
@@ -53,6 +53,14 @@ MainWindow::MainWindow(QWidget *parent)
 
     camera->start();
     ui->startButton->setEnabled(false);
+
+    // Partie apprentissage
+    ui->apprentissageFrame->setVisible(false);
+    isApprentissageMode = false; // Sécurité : initialisation explicite
+    progressCount = 0;
+
+    timerApprentissage = new QTimer(this);
+    connect(timerApprentissage, &QTimer::timeout, this, &MainWindow::validerGeste);
 }
 
 MainWindow::~MainWindow() {
@@ -87,7 +95,6 @@ int MainWindow::countFingers(const cv::Mat &handRegion) {
 
     if (contours.empty()) return -1;
 
-    // Trouver le plus grand contour
     int maxIdx = 0;
     double maxArea = 0;
     for (int i = 0; i < (int)contours.size(); i++) {
@@ -95,11 +102,8 @@ int MainWindow::countFingers(const cv::Mat &handRegion) {
         if (area > maxArea) { maxArea = area; maxIdx = i; }
     }
 
-    // --- SÉCURITÉ 1 : Taille minimum ---
     if (maxArea < 5000) return -1;
 
-    // --- SÉCURITÉ 2 : Simplification du contour ---
-    // Cela évite les "auto-intersections" mentionnées dans ton erreur
     std::vector<cv::Point> approxContour;
     double peri = cv::arcLength(contours[maxIdx], true);
     cv::approxPolyDP(contours[maxIdx], approxContour, 0.001 * peri, true);
@@ -107,7 +111,6 @@ int MainWindow::countFingers(const cv::Mat &handRegion) {
     std::vector<int> hullIdx;
     cv::convexHull(approxContour, hullIdx, false);
 
-    // --- SÉCURITÉ 3 : Vérification de la forme ---
     if (hullIdx.size() < 3) return 0;
 
     try {
@@ -117,7 +120,7 @@ int MainWindow::countFingers(const cv::Mat &handRegion) {
         int fingers = 0;
         for (const cv::Vec4i &defect : defects) {
             float depth = defect[3] / 256.0f;
-            if (depth > 20) { // Filtre les petits creux (bruit)
+            if (depth > 20) {
                 cv::Point start = approxContour[defect[0]];
                 cv::Point end   = approxContour[defect[1]];
                 cv::Point far   = approxContour[defect[2]];
@@ -126,21 +129,17 @@ int MainWindow::countFingers(const cv::Mat &handRegion) {
                 double b = std::sqrt(std::pow(far.x - start.x, 2) + std::pow(far.y - start.y, 2));
                 double c = std::sqrt(std::pow(end.x - far.x, 2) + std::pow(end.y - far.y, 2));
 
-                // Loi des cosinus
                 double angle = std::acos((b*b + c*c - a*a) / (2*b*c)) * 57.29;
-
-                if (angle <= 90) {
-                    fingers++;
-                }
+                if (angle <= 90) fingers++;
             }
         }
         return fingers;
     } catch (cv::Exception& e) {
-        // Si OpenCV détecte quand même une erreur, on ne plante pas, on ignore juste la frame
         qDebug() << "Erreur OpenCV évitée :" << e.what();
         return -1;
     }
 }
+
 QString MainWindow::detectGesture(const cv::Mat &frame) {
     int cx = frame.cols / 2; int cy = frame.rows / 2;
     int w = frame.cols / 3;  int h = frame.rows / 2;
@@ -152,11 +151,10 @@ QString MainWindow::detectGesture(const cv::Mat &frame) {
     if (f == 0)  return "poing";
     if (f == 1)  return "un_doigt";
     if (f == 2)  return "deux_doigts";
-    if (f == 3)  return "trois_doigts";
+    if (f == 3)  return "trois_doigt"; // Attention : ton fichier s'appelle 'trois_doigt' sans 's'
     return "main_ouverte";
 }
 
-// --- TRAITEMENT ET AFFICHAGE ---
 void MainWindow::processFrame(const QVideoFrame &frame) {
     QImage img = frame.toImage();
     if (img.isNull()) return;
@@ -170,53 +168,63 @@ void MainWindow::processFrame(const QVideoFrame &frame) {
 
     QString gestureKey = detectGesture(mat);
 
-    if (gestureKey != "aucun") {
-        // --- LOGIQUE DE PRIORITÉ SOS ---
-        QString contexteActuel;
-        if (isUrgencyMode) {
-            contexteActuel = "Urgence"; // Force le contexte
+    if (isApprentissageMode) {
+        ui->gestureLabel->setText(QString("Mode Apprentissage | Cible : %1").arg(gesteCible));
+
+        if (gestureKey == gesteCible) {
+            if (!timerApprentissage->isActive()) {
+                timerApprentissage->start(1000);
+            }
+            ui->translationLabel->setText(QString("Maintenez encore... %1/3s").arg(progressCount));
+            ui->translationLabel->setStyleSheet("background-color: #FFA500; color: white; font-weight: bold; border-radius: 10px;");
         } else {
-            contexteActuel = ui->contexteCombo->currentText().trimmed();
+            timerApprentissage->stop();
+            progressCount = 0;
+            if (gestureKey == "aucun") {
+                ui->translationLabel->setText("Placez votre main comme l'image");
+                ui->translationLabel->setStyleSheet("background-color: #555555; color: white; border-radius: 10px;");
+            } else {
+                ui->translationLabel->setText("Mauvais geste, réessayez !");
+                ui->translationLabel->setStyleSheet("background-color: #CC0000; color: white; border-radius: 10px;");
+            }
         }
-
-        QString langueActuelle = ui->langueCombo->currentText().trimmed();
-
-        QSqlQuery query;
-        query.prepare("SELECT word, color FROM gestures WHERE gesture = :g AND contexte = :c AND langue = :l");
-        query.bindValue(":g", gestureKey);
-        query.bindValue(":c", contexteActuel);
-        query.bindValue(":l", langueActuelle);
-
-        if (query.exec() && query.next()) {
-            QString translation = query.value(0).toString();
-            QString color = query.value(1).toString();
-
-            ui->gestureLabel->setText(QString("Geste : %1 | %2").arg(gestureKey).arg(langueActuelle));
-            ui->translationLabel->setText(translation);
-
-            // Style spécial si Urgence
-            QString style = QString("background-color: %1; color: white; border-radius: 10px; padding: 5px; font-weight: bold;").arg(color);
-            if(isUrgencyMode) style += "border: 3px solid yellow; font-size: 20px;";
-
-            ui->translationLabel->setStyleSheet(style);
-        } else {
-            ui->gestureLabel->setText("Geste : " + gestureKey);
-            ui->translationLabel->setText("Non défini (" + langueActuelle + ")");
-            ui->translationLabel->setStyleSheet("color: red; font-weight: bold;");
-        }
-    } else {
-        ui->gestureLabel->setText("Placez la main ici");
-        ui->translationLabel->setText("—");
-        ui->translationLabel->setStyleSheet("background-color: transparent; color: gray;");
     }
+    else {
+        if (gestureKey != "aucun") {
+            QString contexteActuel = isUrgencyMode ? "Urgence" : ui->contexteCombo->currentText().trimmed();
+            QString langueActuelle = ui->langueCombo->currentText().trimmed();
 
+            QSqlQuery query;
+            query.prepare("SELECT word, color FROM gestures WHERE gesture = :g AND contexte = :c AND langue = :l");
+            query.bindValue(":g", gestureKey);
+            query.bindValue(":c", contexteActuel);
+            query.bindValue(":l", langueActuelle);
+
+            if (query.exec() && query.next()) {
+                QString translation = query.value(0).toString();
+                QString color = query.value(1).toString();
+                ui->gestureLabel->setText(QString("Geste : %1 | %2").arg(gestureKey).arg(langueActuelle));
+                ui->translationLabel->setText(translation);
+                QString style = QString("background-color: %1; color: white; border-radius: 10px; padding: 5px; font-weight: bold;").arg(color);
+                if(isUrgencyMode) style += "border: 3px solid yellow; font-size: 20px;";
+                ui->translationLabel->setStyleSheet(style);
+            } else {
+                ui->gestureLabel->setText("Geste : " + gestureKey);
+                ui->translationLabel->setText("Non défini (" + langueActuelle + ")");
+                ui->translationLabel->setStyleSheet("color: red; font-weight: bold;");
+            }
+        } else {
+            ui->gestureLabel->setText("Placez la main ici");
+            ui->translationLabel->setText("—");
+            ui->translationLabel->setStyleSheet("background-color: transparent; color: gray;");
+        }
+    }
     ui->cameraLabel->setPixmap(QPixmap::fromImage(MatToQImage(mat)));
 }
 
-// --- SLOTS DES BOUTONS ---
+// --- SLOTS ---
 void MainWindow::on_sosButton_clicked() {
     isUrgencyMode = !isUrgencyMode;
-
     if (isUrgencyMode) {
         ui->sosButton->setStyleSheet("background-color: #FF0000; color: white; font-weight: bold; border: 4px solid #FFFF00; border-radius: 5px;");
         ui->sosButton->setText("!!! SOS ACTIF !!!");
@@ -236,4 +244,47 @@ void MainWindow::on_stopButton_clicked() {
     camera->stop();
     ui->startButton->setEnabled(true);
     ui->stopButton->setEnabled(false);
+}
+
+void MainWindow::on_apprentissageToggle_clicked() {
+    isApprentissageMode = !isApprentissageMode;
+    ui->apprentissageFrame->setVisible(isApprentissageMode);
+    ui->contexteCombo->setVisible(!isApprentissageMode);
+    ui->langueCombo->setVisible(!isApprentissageMode);
+    ui->sosButton->setVisible(!isApprentissageMode);
+
+    if (isApprentissageMode) {
+        ui->apprentissageToggle->setText("Retour à la Traduction");
+        gesteCible = "poing";
+        ui->consigneLabel->setText("Imitez le poing pour dire 'J'ai mal'");
+        // Chemin mis à jour selon ton fichier .qrc (prefix /images + folder images/)
+        ui->imageModele->setPixmap(QPixmap(":/images/images/poing.jpg"));
+    } else {
+        ui->apprentissageToggle->setText("Mode Apprentissage");
+        timerApprentissage->stop();
+        progressCount = 0;
+    }
+}
+
+void MainWindow::validerGeste() {
+    progressCount++;
+    if (progressCount >= 3) {
+        timerApprentissage->stop();
+        ui->translationLabel->setText("BRAVO ! Geste maîtrisé.");
+        ui->translationLabel->setStyleSheet("background-color: green; color: white; border-radius: 10px; font-weight: bold;");
+        progressCount = 0;
+
+        // Logique pour passer au geste suivant après 2 secondes
+        QTimer::singleShot(2000, this, [this](){
+            if (gesteCible == "poing") {
+                gesteCible = "un_doigt";
+                ui->consigneLabel->setText("Imitez l'index pour dire 'Santé'");
+                ui->imageModele->setPixmap(QPixmap(":/images/images/un_doigt.webp"));
+            } else if (gesteCible == "un_doigt") {
+                gesteCible = "deux_doigts";
+                ui->consigneLabel->setText("Faites le signe V pour 'Merci'");
+                ui->imageModele->setPixmap(QPixmap(":/images/images/deux_doigts.webp"));
+            }
+        });
+    }
 }

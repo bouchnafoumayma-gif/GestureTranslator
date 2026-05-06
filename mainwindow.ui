@@ -73,7 +73,7 @@
    <widget class="QPushButton" name="startButton">
     <property name="geometry">
      <rect>
-      <x>230</x>
+      <x>140</x>
       <y>520</y>
       <width>150</width>
       <height>40</height>
@@ -86,7 +86,7 @@
    <widget class="QPushButton" name="stopButton">
     <property name="geometry">
      <rect>
-      <x>410</x>
+      <x>520</x>
       <y>520</y>
       <width>150</width>
       <height>40</height>
@@ -160,6 +160,64 @@
     </property>
     <property name="text">
      <string>URGENCE / SOS</string>
+    </property>
+   </widget>
+   <widget class="QFrame" name="apprentissageFrame">
+    <property name="enabled">
+     <bool>false</bool>
+    </property>
+    <property name="geometry">
+     <rect>
+      <x>649</x>
+      <y>50</y>
+      <width>141</width>
+      <height>351</height>
+     </rect>
+    </property>
+    <property name="frameShape">
+     <enum>QFrame::Shape::StyledPanel</enum>
+    </property>
+    <property name="frameShadow">
+     <enum>QFrame::Shadow::Raised</enum>
+    </property>
+    <widget class="QLabel" name="imageModele">
+     <property name="geometry">
+      <rect>
+       <x>16</x>
+       <y>9</y>
+       <width>111</width>
+       <height>171</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>TextLabel</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="consigneLabel">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>180</y>
+       <width>111</width>
+       <height>151</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>TextLabel</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QPushButton" name="apprentissageToggle">
+    <property name="geometry">
+     <rect>
+      <x>325</x>
+      <y>519</y>
+      <width>141</width>
+      <height>41</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>PushButton</string>
     </property>
    </widget>
   </widget>

@@ -22,6 +22,11 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
 DISTFILES += \
+    ../../Downloads/deux_doigts.webp \
+    ../../Downloads/main_ouverte.webp \
+    ../../Downloads/poing.jpg \
+    ../../Downloads/trois_doigt.webp \
+    ../../Downloads/un_doigt.webp \
     app.manifest
 
 # Lien vers OpenCV
@@ -36,5 +41,8 @@ LIBS += -LC:\opencv_mingw\OpenCV-MinGW-Build-OpenCV-4.5.5-x64\x64\mingw\lib \
         -lopencv_video455 \
         -lopencv_videoio455 \
         -lopencv_objdetect455
+
+RESOURCES += \
+    resources.qrc
 
 
