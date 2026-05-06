@@ -29,6 +29,9 @@ private slots:
     void on_startButton_clicked();
     void on_stopButton_clicked();
     void processFrame(const QVideoFrame &frame);
+    // Sous la section private slots:
+    void on_sosButton_clicked();
+
 
 private:
 private:
@@ -37,6 +40,8 @@ private:
     QMediaCaptureSession *session;
     QVideoSink *videoSink;
     QImage currentFrame;
+    // Sous la section private:
+    bool isUrgencyMode;
 
     // --- SQL ---
     QSqlDatabase db;
@@ -51,5 +56,9 @@ private:
     QString lastGesture;
     int stabilityCounter = 0;
 };
+
+
+
+
 
 #endif
