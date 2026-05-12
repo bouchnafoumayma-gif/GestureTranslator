@@ -28,8 +28,9 @@ MainWindow::MainWindow(QWidget *parent)
     // 2. Configuration de l'Interface
     setWindowTitle("GestureTranslator - ENSAH");
     ui->cameraLabel->setScaledContents(true);
-    ui->imageModele->setScaledContents(true); // Ajouté pour que l'image de consigne s'adapte bien
+    ui->imageModele->setScaledContents(true);
 
+    // Synchronisation avec les valeurs de la base (image_e3490e.png)
     if(ui->contexteCombo->count() == 0) {
         ui->contexteCombo->addItems({"General", "Sante", "Restaurant"});
     }
@@ -54,9 +55,8 @@ MainWindow::MainWindow(QWidget *parent)
     camera->start();
     ui->startButton->setEnabled(false);
 
-    // Partie apprentissage
     ui->apprentissageFrame->setVisible(false);
-    isApprentissageMode = false; // Sécurité : initialisation explicite
+    isApprentissageMode = false;
     progressCount = 0;
 
     timerApprentissage = new QTimer(this);
@@ -83,7 +83,6 @@ QImage MatToQImage(const cv::Mat &mat) {
     return QImage(rgb.data, rgb.cols, rgb.rows, rgb.step, QImage::Format_RGB888).copy();
 }
 
-// --- ALGORITHME (Loi des Cosinus) ---
 int MainWindow::countFingers(const cv::Mat &handRegion) {
     cv::Mat gray, binary;
     cv::cvtColor(handRegion, gray, cv::COLOR_BGR2GRAY);
@@ -135,7 +134,6 @@ int MainWindow::countFingers(const cv::Mat &handRegion) {
         }
         return fingers;
     } catch (cv::Exception& e) {
-        qDebug() << "Erreur OpenCV évitée :" << e.what();
         return -1;
     }
 }
@@ -147,11 +145,13 @@ QString MainWindow::detectGesture(const cv::Mat &frame) {
     cv::Mat handRegion = frame(zone);
 
     int f = countFingers(handRegion);
+
+    // CORRECTION : Harmonisation avec les noms de la table SQL (pluriels)
     if (f == -1) return "aucun";
     if (f == 0)  return "poing";
     if (f == 1)  return "un_doigt";
     if (f == 2)  return "deux_doigts";
-    if (f == 3)  return "trois_doigt"; // Attention : ton fichier s'appelle 'trois_doigt' sans 's'
+    if (f == 3)  return "trois_doigts"; // Ajout du 's' pour correspondre à image_e3490e.png
     return "main_ouverte";
 }
 
@@ -170,23 +170,13 @@ void MainWindow::processFrame(const QVideoFrame &frame) {
 
     if (isApprentissageMode) {
         ui->gestureLabel->setText(QString("Mode Apprentissage | Cible : %1").arg(gesteCible));
-
         if (gestureKey == gesteCible) {
-            if (!timerApprentissage->isActive()) {
-                timerApprentissage->start(1000);
-            }
+            if (!timerApprentissage->isActive()) timerApprentissage->start(1000);
             ui->translationLabel->setText(QString("Maintenez encore... %1/3s").arg(progressCount));
-            ui->translationLabel->setStyleSheet("background-color: #FFA500; color: white; font-weight: bold; border-radius: 10px;");
         } else {
             timerApprentissage->stop();
             progressCount = 0;
-            if (gestureKey == "aucun") {
-                ui->translationLabel->setText("Placez votre main comme l'image");
-                ui->translationLabel->setStyleSheet("background-color: #555555; color: white; border-radius: 10px;");
-            } else {
-                ui->translationLabel->setText("Mauvais geste, réessayez !");
-                ui->translationLabel->setStyleSheet("background-color: #CC0000; color: white; border-radius: 10px;");
-            }
+            ui->translationLabel->setText(gestureKey == "aucun" ? "Imitez l'image" : "Mauvais geste");
         }
     }
     else {
@@ -195,32 +185,36 @@ void MainWindow::processFrame(const QVideoFrame &frame) {
             QString langueActuelle = ui->langueCombo->currentText().trimmed();
 
             QSqlQuery query;
-            query.prepare("SELECT word, color FROM gestures WHERE gesture = :g AND contexte = :c AND langue = :l");
+            // CORRECTION : La colonne de langue dans vos images s'appelle 'translation'
+            query.prepare("SELECT word, color FROM gestes WHERE gesture = :g AND contexte = :c AND translation = :l");
             query.bindValue(":g", gestureKey);
             query.bindValue(":c", contexteActuel);
             query.bindValue(":l", langueActuelle);
 
             if (query.exec() && query.next()) {
-                QString translation = query.value(0).toString();
-                QString color = query.value(1).toString();
-                ui->gestureLabel->setText(QString("Geste : %1 | %2").arg(gestureKey).arg(langueActuelle));
-                ui->translationLabel->setText(translation);
-                QString style = QString("background-color: %1; color: white; border-radius: 10px; padding: 5px; font-weight: bold;").arg(color);
-                if(isUrgencyMode) style += "border: 3px solid yellow; font-size: 20px;";
-                ui->translationLabel->setStyleSheet(style);
+                QString translationText = query.value(0).toString();
+                QString colorName = query.value(1).toString();
+
+                ui->gestureLabel->setText(QString("Geste : %1 (%2)").arg(gestureKey).arg(langueActuelle));
+                ui->translationLabel->setText(translationText);
+                ui->translationLabel->setStyleSheet(QString("background-color: %1; color: white; border-radius: 10px; font-weight: bold;").arg(colorName));
             } else {
                 ui->gestureLabel->setText("Geste : " + gestureKey);
                 ui->translationLabel->setText("Non défini (" + langueActuelle + ")");
                 ui->translationLabel->setStyleSheet("color: red; font-weight: bold;");
+                // Log pour debug
+                qDebug() << "Non trouvé:" << gestureKey << contexteActuel << langueActuelle;
             }
         } else {
-            ui->gestureLabel->setText("Placez la main ici");
+            ui->gestureLabel->setText("Placez la main dans le cadre");
             ui->translationLabel->setText("—");
-            ui->translationLabel->setStyleSheet("background-color: transparent; color: gray;");
+            ui->translationLabel->setStyleSheet("color: gray;");
         }
     }
     ui->cameraLabel->setPixmap(QPixmap::fromImage(MatToQImage(mat)));
 }
+
+// ... Reste des slots (SOS, start, stop, apprentissage) ...
 
 // --- SLOTS ---
 void MainWindow::on_sosButton_clicked() {
