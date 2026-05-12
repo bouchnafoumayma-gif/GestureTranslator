@@ -8,11 +8,12 @@
 #include <QVideoFrame>
 #include <QImage>
 #include <QLabel>
-#include <QTimer> // Ajouté pour QTimer*
+#include <QTimer>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <QtTextToSpeech/QTextToSpeech>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -33,35 +34,41 @@ private slots:
     void on_sosButton_clicked();
     void on_apprentissageToggle_clicked();
     void validerGeste();
+    void on_muteButton_clicked(); // <--- AJOUTÉ : Pour le bouton de son
 
 private:
     Ui::MainWindow *ui;
 
-    // Caméra et flux
+    // --- Variables pour la Synthèse Vocale ---
+    QTextToSpeech *m_speech;
+    QString lastSpokenWord;
+    bool isVoiceEnabled; // Initialisée dans le constructeur .cpp
+
+    // --- Caméra et flux ---
     QCamera *camera;
     QMediaCaptureSession *session;
     QVideoSink *videoSink;
     QImage currentFrame;
 
-    // États et modes
+    // --- États et modes ---
     bool isUrgencyMode;
-    bool isApprentissageMode = false;
+    bool isApprentissageMode;
     QString gesteCible;
     QTimer *timerApprentissage;
-    int progressCount = 0;
+    int progressCount;
 
-    // SQL
+    // --- SQL ---
     QSqlDatabase db;
     void initDatabase();
     QString getTranslation(const QString &gesture);
 
-    // Traitement d'image (OpenCV)
+    // --- Traitement d'image (OpenCV) ---
     QString detectGesture(const cv::Mat &frame);
     int countFingers(const cv::Mat &handRegion);
 
-    // Stabilité
+    // --- Stabilité ---
     QString lastGesture;
-    int stabilityCounter = 0;
+    int stabilityCounter;
 };
 
 #endif // MAINWINDOW_H

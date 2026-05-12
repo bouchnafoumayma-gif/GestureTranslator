@@ -8,6 +8,7 @@
 #include <cmath>
 #include <opencv2/imgproc.hpp>
 #include <QTimer>
+#include <QtTextToSpeech>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -25,12 +26,16 @@ MainWindow::MainWindow(QWidget *parent)
         qDebug() << "Connexion réussie à la base gestures.";
     }
 
-    // 2. Configuration de l'Interface
+    // 2. Initialisation de la Synthèse Vocale
+    m_speech = new QTextToSpeech(this);
+    lastSpokenWord = "";
+    isVoiceEnabled = true;
+
+    // 3. Configuration de l'Interface
     setWindowTitle("GestureTranslator - ENSAH");
     ui->cameraLabel->setScaledContents(true);
     ui->imageModele->setScaledContents(true);
 
-    // Synchronisation avec les valeurs de la base (image_e3490e.png)
     if(ui->contexteCombo->count() == 0) {
         ui->contexteCombo->addItems({"General", "Sante", "Restaurant"});
     }
@@ -41,7 +46,7 @@ MainWindow::MainWindow(QWidget *parent)
     isUrgencyMode = false;
     ui->sosButton->setStyleSheet("background-color: #8B0000; color: white; font-weight: bold; border-radius: 5px;");
 
-    // 3. Configuration Caméra
+    // 4. Configuration Caméra
     QList<QCameraDevice> camList = QMediaDevices::videoInputs();
     camera = (!camList.isEmpty()) ? new QCamera(camList.first(), this) : new QCamera(this);
 
@@ -58,13 +63,15 @@ MainWindow::MainWindow(QWidget *parent)
     ui->apprentissageFrame->setVisible(false);
     isApprentissageMode = false;
     progressCount = 0;
+    stabilityCounter = 0;
+    lastGesture = "";
 
     timerApprentissage = new QTimer(this);
     connect(timerApprentissage, &QTimer::timeout, this, &MainWindow::validerGeste);
 }
 
 MainWindow::~MainWindow() {
-    camera->stop();
+    if (camera) camera->stop();
     delete ui;
 }
 
@@ -73,8 +80,9 @@ cv::Mat QImageToMat(const QImage &image) {
     QImage converted = image.convertToFormat(QImage::Format_RGB888);
     cv::Mat mat(converted.height(), converted.width(), CV_8UC3,
                 const_cast<uchar*>(converted.bits()), converted.bytesPerLine());
-    cv::cvtColor(mat, mat, cv::COLOR_RGB2BGR);
-    return mat.clone();
+    cv::Mat result;
+    cv::cvtColor(mat, result, cv::COLOR_RGB2BGR);
+    return result.clone();
 }
 
 QImage MatToQImage(const cv::Mat &mat) {
@@ -96,7 +104,7 @@ int MainWindow::countFingers(const cv::Mat &handRegion) {
 
     int maxIdx = 0;
     double maxArea = 0;
-    for (int i = 0; i < (int)contours.size(); i++) {
+    for (int i = 0; i < static_cast<int>(contours.size()); i++) {
         double area = cv::contourArea(contours[i]);
         if (area > maxArea) { maxArea = area; maxIdx = i; }
     }
@@ -133,7 +141,7 @@ int MainWindow::countFingers(const cv::Mat &handRegion) {
             }
         }
         return fingers;
-    } catch (cv::Exception& e) {
+    } catch (cv::Exception&) {
         return -1;
     }
 }
@@ -146,12 +154,11 @@ QString MainWindow::detectGesture(const cv::Mat &frame) {
 
     int f = countFingers(handRegion);
 
-    // CORRECTION : Harmonisation avec les noms de la table SQL (pluriels)
     if (f == -1) return "aucun";
     if (f == 0)  return "poing";
     if (f == 1)  return "un_doigt";
     if (f == 2)  return "deux_doigts";
-    if (f == 3)  return "trois_doigts"; // Ajout du 's' pour correspondre à image_e3490e.png
+    if (f == 3)  return "trois_doigts";
     return "main_ouverte";
 }
 
@@ -180,32 +187,53 @@ void MainWindow::processFrame(const QVideoFrame &frame) {
         }
     }
     else {
+        // --- MODIFICATION ICI : AFFICHAGE INSTANTANÉ ---
         if (gestureKey != "aucun") {
-            QString contexteActuel = isUrgencyMode ? "Urgence" : ui->contexteCombo->currentText().trimmed();
-            QString langueActuelle = ui->langueCombo->currentText().trimmed();
+            // On affiche le nom du geste immédiatement
+            ui->gestureLabel->setText(QString("Geste détecté : %1").arg(gestureKey));
 
-            QSqlQuery query;
-            // CORRECTION : La colonne de langue dans vos images s'appelle 'translation'
-            query.prepare("SELECT word, color FROM gestes WHERE gesture = :g AND contexte = :c AND translation = :l");
-            query.bindValue(":g", gestureKey);
-            query.bindValue(":c", contexteActuel);
-            query.bindValue(":l", langueActuelle);
-
-            if (query.exec() && query.next()) {
-                QString translationText = query.value(0).toString();
-                QString colorName = query.value(1).toString();
-
-                ui->gestureLabel->setText(QString("Geste : %1 (%2)").arg(gestureKey).arg(langueActuelle));
-                ui->translationLabel->setText(translationText);
-                ui->translationLabel->setStyleSheet(QString("background-color: %1; color: white; border-radius: 10px; font-weight: bold;").arg(colorName));
+            // Logique de stabilité
+            if (gestureKey == lastGesture) {
+                stabilityCounter++;
             } else {
-                ui->gestureLabel->setText("Geste : " + gestureKey);
-                ui->translationLabel->setText("Non défini (" + langueActuelle + ")");
-                ui->translationLabel->setStyleSheet("color: red; font-weight: bold;");
-                // Log pour debug
-                qDebug() << "Non trouvé:" << gestureKey << contexteActuel << langueActuelle;
+                stabilityCounter = 0;
+                lastGesture = gestureKey;
+                lastSpokenWord = "";
+                ui->translationLabel->setText("Analyse...");
+                ui->translationLabel->setStyleSheet("color: orange;");
+            }
+
+            // Si stable (environ 2 secondes)
+            if (stabilityCounter >= 60) {
+                QString contexteActuel = isUrgencyMode ? "Urgence" : ui->contexteCombo->currentText().trimmed();
+                QString langueActuelle = ui->langueCombo->currentText().trimmed();
+
+                QSqlQuery query;
+                query.prepare("SELECT word, color FROM gestes WHERE gesture = :g AND contexte = :c AND translation = :l");
+                query.bindValue(":g", gestureKey);
+                query.bindValue(":c", contexteActuel);
+                query.bindValue(":l", langueActuelle);
+
+                if (query.exec() && query.next()) {
+                    QString translationText = query.value(0).toString();
+                    QString colorName = query.value(1).toString();
+
+                    ui->translationLabel->setText(translationText);
+                    ui->translationLabel->setStyleSheet(QString("background-color: %1; color: white; border-radius: 10px; font-weight: bold;").arg(colorName));
+
+                    if (isVoiceEnabled && m_speech && translationText != lastSpokenWord) {
+                        m_speech->say(translationText);
+                        lastSpokenWord = translationText;
+                    }
+                }
+            } else {
+                // Montre la progression à l'utilisateur
+                ui->translationLabel->setText(QString("Validation... %1%").arg((stabilityCounter * 100) / 60));
             }
         } else {
+            stabilityCounter = 0;
+            lastGesture = "";
+            lastSpokenWord = "";
             ui->gestureLabel->setText("Placez la main dans le cadre");
             ui->translationLabel->setText("—");
             ui->translationLabel->setStyleSheet("color: gray;");
@@ -214,9 +242,19 @@ void MainWindow::processFrame(const QVideoFrame &frame) {
     ui->cameraLabel->setPixmap(QPixmap::fromImage(MatToQImage(mat)));
 }
 
-// ... Reste des slots (SOS, start, stop, apprentissage) ...
+void MainWindow::on_muteButton_clicked() {
+    if (!m_speech) return;
+    isVoiceEnabled = !isVoiceEnabled;
+    if (isVoiceEnabled) {
+        ui->muteButton->setText("🔊 Voix ON");
+        ui->muteButton->setStyleSheet("background-color: #2ecc71; color: white; border-radius: 5px;");
+    } else {
+        ui->muteButton->setText("🔇 Voix OFF");
+        ui->muteButton->setStyleSheet("background-color: #e74c3c; color: white; border-radius: 5px;");
+        m_speech->stop();
+    }
+}
 
-// --- SLOTS ---
 void MainWindow::on_sosButton_clicked() {
     isUrgencyMode = !isUrgencyMode;
     if (isUrgencyMode) {
@@ -229,13 +267,13 @@ void MainWindow::on_sosButton_clicked() {
 }
 
 void MainWindow::on_startButton_clicked() {
-    camera->start();
+    if (camera) camera->start();
     ui->startButton->setEnabled(false);
     ui->stopButton->setEnabled(true);
 }
 
 void MainWindow::on_stopButton_clicked() {
-    camera->stop();
+    if (camera) camera->stop();
     ui->startButton->setEnabled(true);
     ui->stopButton->setEnabled(false);
 }
@@ -251,11 +289,10 @@ void MainWindow::on_apprentissageToggle_clicked() {
         ui->apprentissageToggle->setText("Retour à la Traduction");
         gesteCible = "poing";
         ui->consigneLabel->setText("Imitez le poing pour dire 'J'ai mal'");
-        // Chemin mis à jour selon ton fichier .qrc (prefix /images + folder images/)
         ui->imageModele->setPixmap(QPixmap(":/images/images/poing.jpg"));
     } else {
         ui->apprentissageToggle->setText("Mode Apprentissage");
-        timerApprentissage->stop();
+        if (timerApprentissage) timerApprentissage->stop();
         progressCount = 0;
     }
 }
@@ -263,12 +300,14 @@ void MainWindow::on_apprentissageToggle_clicked() {
 void MainWindow::validerGeste() {
     progressCount++;
     if (progressCount >= 3) {
-        timerApprentissage->stop();
+        if (timerApprentissage) timerApprentissage->stop();
         ui->translationLabel->setText("BRAVO ! Geste maîtrisé.");
         ui->translationLabel->setStyleSheet("background-color: green; color: white; border-radius: 10px; font-weight: bold;");
+
+        if (isVoiceEnabled && m_speech) m_speech->say("Félicitations, geste maîtrisé");
+
         progressCount = 0;
 
-        // Logique pour passer au geste suivant après 2 secondes
         QTimer::singleShot(2000, this, [this](){
             if (gesteCible == "poing") {
                 gesteCible = "un_doigt";
